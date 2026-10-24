@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.spec
+
+# Build & Dist
+build/
+dist/
+release/
+
+# User data & Media (НИКОГДА не пушить записи и логи встреч в репозиторий!)
+recordings/
+logs/
+*.log
+*.wav
+*.mp4
+*.mp3
+
+# Virtual environments
+venv/
+env/
+.env
+
+# IDE
+.idea/
+.vscode/
