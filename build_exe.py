@@ -16,6 +16,7 @@ def build():
         "--name=MeetRecorder",
         "--onedir",
         "--noconsole",
+        "--noconfirm",
         "--clean",
         "--collect-all=soundcard",
         "--collect-all=faster_whisper",

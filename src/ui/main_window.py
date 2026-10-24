@@ -9,13 +9,124 @@ from PySide6.QtWidgets import (
     QDialog, QFormLayout, QScrollArea, QFrame
 )
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QFont, QCloseEvent, QDesktopServices
+from PySide6.QtGui import QFont, QCloseEvent, QDesktopServices, QKeySequence
 
 from src.config import config, APP_VERSION, get_base_recordings_dir
 from src.queue_manager import queue_manager
 from src.audio_recorder import get_audio_devices
 from src.updater import UpdateCheckerThread, UpdateDialog
 from src.logger import get_logs_dir, logger
+from src.hotkeys import format_hotkey_display
+
+class HotkeyCaptureButton(QPushButton):
+    """
+    Интерактивная кнопка записи горячей клавиши.
+    Пользователь кликает -> нажимает любую комбинацию (например Ctrl+Alt+Z или F9) ->
+    комбинация автоматически перехватывается без ввода текста вручную.
+    """
+    hotkey_captured = Signal(str)
+
+    def __init__(self, current_hotkey="<ctrl>+<alt>+z", parent=None):
+        super().__init__(parent)
+        self.current_hotkey = current_hotkey
+        self.is_recording = False
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.clicked.connect(self.start_recording)
+        self.update_style()
+
+    def update_style(self):
+        if self.is_recording:
+            self.setText("🔴 Нажмите сочетание клавиш (Esc для отмены)...")
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: #2D3748;
+                    color: #00FFCC;
+                    border: 2px solid #00FFCC;
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-weight: bold;
+                    font-size: 13px;
+                    text-align: left;
+                }
+            """)
+        else:
+            disp = format_hotkey_display(self.current_hotkey)
+            self.setText(f"⌨  {disp}   (Нажмите, чтобы изменить)")
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: #262A36;
+                    color: #FFFFFF;
+                    border: 1px solid #3A3F52;
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-weight: bold;
+                    font-size: 13px;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    border-color: #00FFCC;
+                    background-color: #2E3444;
+                }
+            """)
+
+    def start_recording(self):
+        self.is_recording = True
+        self.update_style()
+        self.setFocus()
+
+    def stop_recording(self):
+        self.is_recording = False
+        self.update_style()
+        self.clearFocus()
+
+    def keyPressEvent(self, event):
+        if not self.is_recording:
+            super().keyPressEvent(event)
+            return
+
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            self.stop_recording()
+            return
+
+        mods = event.modifiers()
+        parts = []
+        if mods & Qt.KeyboardModifier.ControlModifier:
+            parts.append("ctrl")
+        if mods & Qt.KeyboardModifier.AltModifier:
+            parts.append("alt")
+        if mods & Qt.KeyboardModifier.ShiftModifier:
+            parts.append("shift")
+        if mods & Qt.KeyboardModifier.MetaModifier:
+            parts.append("win")
+
+        # Если нажата чисто клавиша-модификатор (Ctrl/Alt/Shift), ждем саму клавишу
+        if key in (Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Shift, Qt.Key.Key_Meta):
+            display_mods = " + ".join([p.capitalize() for p in parts])
+            self.setText(f"🔴 {display_mods} + ...")
+            return
+
+        # Основная клавиша
+        key_name = ""
+        if Qt.Key.Key_F1 <= key <= Qt.Key.Key_F12:
+            key_name = f"f{key - Qt.Key.Key_F1 + 1}"
+        elif key == Qt.Key.Key_Space:
+            key_name = "space"
+        elif key == Qt.Key.Key_Tab:
+            key_name = "tab"
+        else:
+            text = event.text().strip().lower()
+            if text and len(text) == 1 and (text.isalnum() or text in "-=[]\\;',./"):
+                key_name = text
+            else:
+                key_name = QKeySequence(key).toString().lower()
+
+        if key_name and key_name not in parts:
+            parts.append(key_name)
+            new_hk = "+".join([f"<{p}>" if len(p) > 1 else p for p in parts])
+            self.current_hotkey = new_hk
+            self.hotkey_captured.emit(new_hk)
+            self.stop_recording()
 
 class ProjectEditDialog(QDialog):
     def __init__(self, parent=None, project_name="", project_folder=""):
@@ -114,7 +225,6 @@ class MainWindow(QMainWindow):
         self.is_force_quitting = False
         self.init_ui()
 
-        # Сигналы менеджера очереди
         queue_manager.task_added.connect(self._on_task_updated)
         queue_manager.task_updated.connect(self._on_task_updated)
 
@@ -413,15 +523,29 @@ class MainWindow(QMainWindow):
         c_win_lay.addWidget(self.chk_minimized)
         layout.addWidget(card_win)
 
-        # 2. ⌨️ Горячие клавиши
+        # 2. ⌨️ Горячие клавиши (Интерактивная запись комбинаций)
         card_hk = QFrame()
         card_hk.setObjectName("card")
         c_hk_lay = QVBoxLayout(card_hk)
         c_hk_lay.setSpacing(8)
         c_hk_lay.addWidget(QLabel("<b>⌨️ Горячая клавиша для старта и остановки записи:</b>"))
-        self.txt_hotkey = QLineEdit(config.get("hotkey", "<ctrl>+<alt>+z"))
-        self.txt_hotkey.setPlaceholderText("Например: <ctrl>+<alt>+z или ctrl+shift+r")
-        c_hk_lay.addWidget(self.txt_hotkey)
+
+        hk_box = QHBoxLayout()
+        current_hk = config.get("hotkey", "<ctrl>+<alt>+z")
+        self.btn_hotkey = HotkeyCaptureButton(current_hk)
+
+        btn_reset_hk = QPushButton("Сброс (Ctrl+Alt+Z)")
+        btn_reset_hk.setObjectName("btn_secondary")
+        btn_reset_hk.clicked.connect(self._reset_hotkey_default)
+
+        hk_box.addWidget(self.btn_hotkey, 1)
+        hk_box.addWidget(btn_reset_hk)
+        c_hk_lay.addLayout(hk_box)
+
+        lbl_hk_hint = QLabel("<i>Нажмите кнопку выше и зажмите нужные клавиши (например Ctrl + Alt + Z или F9).</i>")
+        lbl_hk_hint.setStyleSheet("color: #9AA0A6; font-size: 11px;")
+        c_hk_lay.addWidget(lbl_hk_hint)
+
         layout.addWidget(card_hk)
 
         # 3. 🎙️ Аудиоустройства и Сигналы
@@ -554,6 +678,10 @@ class MainWindow(QMainWindow):
         tab_lay.setContentsMargins(0, 0, 0, 0)
         tab_lay.addWidget(scroll)
 
+    def _reset_hotkey_default(self):
+        self.btn_hotkey.current_hotkey = "<ctrl>+<alt>+z"
+        self.btn_hotkey.update_style()
+
     def _open_recordings_folder(self):
         rec_dir = get_base_recordings_dir()
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(rec_dir)))
@@ -583,7 +711,7 @@ class MainWindow(QMainWindow):
         config.set("start_minimized", self.chk_minimized.isChecked())
 
         old_hk = config.get("hotkey", "<ctrl>+<alt>+z")
-        new_hk = self.txt_hotkey.text().strip()
+        new_hk = self.btn_hotkey.current_hotkey
         config.set("hotkey", new_hk)
         if new_hk != old_hk:
             self.hotkey_changed.emit(new_hk)
