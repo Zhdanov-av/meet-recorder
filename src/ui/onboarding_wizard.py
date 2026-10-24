@@ -17,6 +17,10 @@ from src.config import config
 from src.audio_recorder import get_audio_devices, get_active_devices
 from src.logger import logger
 
+class NoWheelComboBox(QComboBox):
+    def wheelEvent(self, event):
+        event.ignore()
+
 class ModelDownloadWorker(QThread):
     finished_signal = Signal(bool, str)
 
@@ -29,10 +33,8 @@ class ModelDownloadWorker(QThread):
         try:
             logger.info(f"[Onboarding] Предварительная загрузка модели '{self.model_size}'...")
             from faster_whisper import WhisperModel
-            compute_type = "float16" if self.device == "cuda" else "int8"
-            
-            # Загружаем модель в локальный кэш
-            WhisperModel(self.model_size, device=self.device, compute_type=compute_type)
+            # Всегда загружаем на CPU для гарантированного скачивания весов без зависимости от драйверов CUDA
+            WhisperModel(self.model_size, device="cpu", compute_type="int8")
             logger.info(f"[Onboarding] Модель '{self.model_size}' успешно загружена в кэш!")
             self.finished_signal.emit(True, "")
         except Exception as e:
@@ -242,7 +244,7 @@ class OnboardingWizardDialog(QDialog):
         c_lay.addWidget(QLabel("🎤 <b>Канал 1: Ваш микрофон (голос)</b>"))
         mics, speakers = get_audio_devices()
 
-        self.combo_mic = QComboBox()
+        self.combo_mic = NoWheelComboBox()
         self.combo_mic.addItem("По умолчанию в системе", "")
         for m in mics:
             self.combo_mic.addItem(m, m)
@@ -261,7 +263,7 @@ class OnboardingWizardDialog(QDialog):
 
         # Канал 2: Динамики
         c_lay.addWidget(QLabel("🔊 <b>Канал 2: Системные динамики (голоса собеседников)</b>"))
-        self.combo_spk = QComboBox()
+        self.combo_spk = NoWheelComboBox()
         self.combo_spk.addItem("По умолчанию в системе", "")
         for s in speakers:
             self.combo_spk.addItem(s, s)
@@ -301,7 +303,7 @@ class OnboardingWizardDialog(QDialog):
         title.setStyleSheet("color: #00FFCC;")
         lay.addWidget(title)
 
-        desc = QLabel("Создайте ваш первый проект и укажите папку, куда будут сохраняться текстовые .md протоколы встреч:")
+        desc = QLabel("Создайте ваш первый проект и укажите папку, куда будут сохраняться текстовые отчеты .md и аудиозаписи встреч:")
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #B0B5C5;")
         lay.addWidget(desc)
@@ -315,7 +317,7 @@ class OnboardingWizardDialog(QDialog):
         self.txt_proj_name = QLineEdit("Общее")
         c_lay.addWidget(self.txt_proj_name)
 
-        c_lay.addWidget(QLabel("<b>Папка для сохранения протоколов (.md):</b>"))
+        c_lay.addWidget(QLabel("<b>Папка проекта (для отчетов и записей):</b>"))
         default_folder = str(Path.home() / "Documents" / "Встречи")
         self.txt_proj_folder = QLineEdit(default_folder)
         btn_browse = QPushButton("📁 Обзор...")
@@ -327,7 +329,7 @@ class OnboardingWizardDialog(QDialog):
         f_lay.addWidget(btn_browse)
         c_lay.addLayout(f_lay)
 
-        note = QLabel("ℹ️ <i>Исходные аудиозаписи будут сохраняться в подпапке <b>recordings/Общее/</b> и автоматически удаляться через 7 дней. Текстовые протоколы остаются навсегда.</i>")
+        note = QLabel("ℹ️ <i>В этой папке будут сохраняться протоколы .md, а аудиофайлы — в подпапку <b>recordings/</b> с автоудалением через 7 дней.</i>")
         note.setWordWrap(True)
         note.setStyleSheet("color: #9AA0A6; font-size: 11px;")
         c_lay.addWidget(note)
@@ -360,12 +362,13 @@ class OnboardingWizardDialog(QDialog):
         c_lay.setSpacing(14)
 
         c_lay.addWidget(QLabel("<b>Выберите модель:</b>"))
-        self.combo_model = QComboBox()
+        self.combo_model = NoWheelComboBox()
         self.combo_model.addItems([
             "medium (Рекомендуется, ~1.5 ГБ, высокий баланс)",
             "small (~500 МБ, быстрая для слабых ПК)",
             "large-v3-turbo (~1.5 ГБ, максимальная точность)"
         ])
+        self.combo_model.currentIndexChanged.connect(self._check_selected_model_cached)
         c_lay.addWidget(self.combo_model)
 
         self.btn_download_model = QPushButton("📥 Загрузить модель в локальный кэш")
@@ -377,9 +380,11 @@ class OnboardingWizardDialog(QDialog):
         self.download_progress.setVisible(False)
         c_lay.addWidget(self.download_progress)
 
-        self.lbl_model_status = QLabel("Модель ещё не загружена.")
+        self.lbl_model_status = QLabel("Проверка наличия модели...")
         self.lbl_model_status.setStyleSheet("color: #9AA0A6;")
         c_lay.addWidget(self.lbl_model_status)
+
+        self._check_selected_model_cached()
 
         lay.addWidget(card)
         lay.addStretch()
@@ -416,12 +421,25 @@ class OnboardingWizardDialog(QDialog):
     def _browse_project_folder(self):
         folder = QFileDialog.getExistingDirectory(
             self,
-            "Выберите папку для сохранения протоколов",
+            "Выберите папку проекта (для отчетов и записей)",
             self.txt_proj_folder.text().strip() or "C:\\",
             QFileDialog.Option.DontUseNativeDialog
         )
         if folder:
             self.txt_proj_folder.setText(folder)
+
+    def _check_selected_model_cached(self):
+        model_str = self.combo_model.currentText().split()[0]
+        hub_dir = Path.home() / ".cache" / "huggingface" / "hub"
+        cached = (hub_dir / f"models--Systran--faster-whisper-{model_str}").exists()
+        if cached:
+            self.lbl_model_status.setText(f"✅ Модель '{model_str}' уже загружена на вашем ПК и готова к работе!")
+            self.lbl_model_status.setStyleSheet("color: #00FFCC; font-weight: bold;")
+            self.btn_download_model.setText("🔄 Проверить / перезагрузить модель")
+        else:
+            self.lbl_model_status.setText("Модель ещё не загружена (будет загружена по кнопке выше или при первой записи).")
+            self.lbl_model_status.setStyleSheet("color: #9AA0A6;")
+            self.btn_download_model.setText("📥 Загрузить модель в локальный кэш")
 
     def _start_model_download(self):
         model_str = self.combo_model.currentText().split()[0]
@@ -438,8 +456,7 @@ class OnboardingWizardDialog(QDialog):
         self.btn_download_model.setEnabled(True)
 
         if success:
-            self.lbl_model_status.setText("✅ Модель успешно готова к работе!")
-            self.lbl_model_status.setStyleSheet("color: #00FFCC; font-weight: bold;")
+            self._check_selected_model_cached()
         else:
             self.lbl_model_status.setText(f"❌ Ошибка: {error_msg}")
             self.lbl_model_status.setStyleSheet("color: #FF5A5A;")

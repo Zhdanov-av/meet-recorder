@@ -57,7 +57,25 @@ def get_base_recordings_dir() -> Path:
         return fallback_recordings
 
 def get_project_recordings_dir(project_name: str) -> Path:
-    """Подпапка 'recordings/<ИмяПроекта>' конкретного проекта"""
+    """
+    Папка хранения аудиозаписей для конкретного проекта.
+    Если у проекта настроена своя папка, аудиозаписи сохраняются в подпапку 'recordings' внутри нее.
+    Иначе используется общая папка recordings в корне программы.
+    """
+    try:
+        cfg_path = get_app_dir() / "config.json"
+        if cfg_path.exists():
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                projects = data.get("projects", {})
+                if project_name in projects and projects[project_name]:
+                    proj_folder = Path(projects[project_name])
+                    target = proj_folder / "recordings"
+                    target.mkdir(parents=True, exist_ok=True)
+                    return target
+    except Exception:
+        pass
+
     safe_name = "".join(c for c in project_name if c.isalnum() or c in (" ", "_", "-")).strip()
     if not safe_name:
         safe_name = "Default"

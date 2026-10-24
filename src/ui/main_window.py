@@ -14,7 +14,6 @@ from PySide6.QtGui import QFont, QCloseEvent, QDesktopServices, QKeySequence, QI
 from src.config import config, APP_VERSION, get_base_recordings_dir, get_install_root
 from src.queue_manager import queue_manager
 from src.audio_recorder import get_audio_devices
-from src.updater import UpdateCheckerThread, UpdateDialog
 from src.logger import get_logs_dir, logger
 from src.hotkeys import format_hotkey_display
 
@@ -42,6 +41,14 @@ def clear_whisper_cache() -> int:
     except Exception as e:
         logger.error(f"Ошибка очистки кэша Whisper: {e}")
     return deleted
+
+class NoWheelComboBox(QComboBox):
+    def wheelEvent(self, event):
+        event.ignore()
+
+class NoWheelSpinBox(QSpinBox):
+    def wheelEvent(self, event):
+        event.ignore()
 
 class HotkeyCaptureButton(QPushButton):
     """
@@ -210,7 +217,7 @@ class ProjectEditDialog(QDialog):
         folder_layout.addWidget(self.btn_browse)
 
         form.addRow("Название проекта:", self.txt_name)
-        form.addRow("Папка для .md отчетов:", folder_layout)
+        form.addRow("Папка проекта:", folder_layout)
 
         layout.addLayout(form)
 
@@ -229,7 +236,7 @@ class ProjectEditDialog(QDialog):
         start_dir = self.txt_folder.text().strip() or str(Path.home() / "Documents")
         folder = QFileDialog.getExistingDirectory(
             self,
-            "Выберите папку проекта для сохранения .md файлов",
+            "Выберите папку проекта (для отчетов и аудиозаписей)",
             start_dir,
             QFileDialog.Option.DontUseNativeDialog
         )
@@ -449,13 +456,13 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(self.tab_projects)
         layout.setContentsMargins(16, 16, 16, 16)
 
-        lbl = QLabel("Список ваших проектов и папок для сохранения .md транскриптов:")
+        lbl = QLabel("Список ваших проектов и папок для сохранения отчетов и записей:")
         lbl.setFont(QFont("Segoe UI", 10))
         layout.addWidget(lbl)
 
         self.table_projects = QTableWidget()
         self.table_projects.setColumnCount(2)
-        self.table_projects.setHorizontalHeaderLabels(["Имя проекта", "Папка для сохранения (.md)"])
+        self.table_projects.setHorizontalHeaderLabels(["Имя проекта", "Папка проекта (отчеты и аудиозаписи)"])
         self.table_projects.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         self.table_projects.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table_projects.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -588,7 +595,7 @@ class MainWindow(QMainWindow):
         mics, speakers = get_audio_devices()
 
         c_aud_lay.addWidget(QLabel("Микрофон (голос пользователя):"))
-        self.combo_mic = QComboBox()
+        self.combo_mic = NoWheelComboBox()
         self.combo_mic.addItem("По умолчанию в системе", "")
         sel_mic = config.get("selected_mic", "")
         for m in mics:
@@ -598,7 +605,7 @@ class MainWindow(QMainWindow):
         c_aud_lay.addWidget(self.combo_mic)
 
         c_aud_lay.addWidget(QLabel("Динамики (голоса собеседников):"))
-        self.combo_spk = QComboBox()
+        self.combo_spk = NoWheelComboBox()
         self.combo_spk.addItem("По умолчанию в системе", "")
         sel_spk = config.get("selected_speaker", "")
         for s in speakers:
@@ -624,7 +631,7 @@ class MainWindow(QMainWindow):
         c_ai_lay.setSpacing(8)
         c_ai_lay.addWidget(QLabel("<b>🧠 Локальная модель Whisper:</b>"))
 
-        self.combo_model = QComboBox()
+        self.combo_model = NoWheelComboBox()
         self.combo_model.addItems(["medium (Рекомендуется)", "small (Быстрая)", "large-v3-turbo (Максимальная точность)"])
         current_m = config.get("whisper_model", "medium")
         for i in range(self.combo_model.count()):
@@ -634,9 +641,9 @@ class MainWindow(QMainWindow):
         c_ai_lay.addWidget(self.combo_model)
 
         c_ai_lay.addWidget(QLabel("Режим вычислений:"))
-        self.combo_device = QComboBox()
-        self.combo_device.addItem("CPU (Стабильный режим на любом ПК)", "cpu")
-        self.combo_device.addItem("GPU (NVIDIA CUDA Ускорение в 5 раз)", "cuda")
+        self.combo_device = NoWheelComboBox()
+        self.combo_device.addItem("CPU (Рекомендуется — стабильно на любом ПК)", "cpu")
+        self.combo_device.addItem("GPU (NVIDIA CUDA — только при установленном CUDA Toolkit 12)", "cuda")
         if config.get("compute_device", "cpu") == "cuda":
             self.combo_device.setCurrentIndex(1)
         c_ai_lay.addWidget(self.combo_device)
@@ -652,7 +659,7 @@ class MainWindow(QMainWindow):
 
         ret_h = QHBoxLayout()
         ret_h.addWidget(QLabel("Удалять аудиозаписи из папки recordings через:"))
-        self.spin_retention = QSpinBox()
+        self.spin_retention = NoWheelSpinBox()
         self.spin_retention.setRange(1, 90)
         self.spin_retention.setValue(config.get("retention_days", 7))
         self.spin_retention.setSuffix(" дней")
@@ -706,15 +713,13 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(card_storage)
 
-        # 6. 🔄 Обновления и Диагностика
+        # 6. ℹ️ О программе и Настройка
         card_update = QFrame()
         card_update.setObjectName("card")
         c_up_lay = QHBoxLayout(card_update)
         
         lbl_v = QLabel(f"<b>Meet Recorder v{APP_VERSION}</b>")
         lbl_v.setStyleSheet("color: #00FFCC;")
-        btn_check_up = QPushButton("🔄 Проверить обновления")
-        btn_check_up.clicked.connect(self._check_updates)
 
         btn_wizard = QPushButton("🧙 Запустить мастер настройки")
         btn_wizard.setObjectName("btn_secondary")
@@ -723,7 +728,6 @@ class MainWindow(QMainWindow):
         c_up_lay.addWidget(lbl_v)
         c_up_lay.addStretch()
         c_up_lay.addWidget(btn_wizard)
-        c_up_lay.addWidget(btn_check_up)
 
         layout.addWidget(card_update)
 
@@ -745,8 +749,21 @@ class MainWindow(QMainWindow):
         self.btn_hotkey.update_style()
 
     def _open_recordings_folder(self):
-        rec_dir = get_base_recordings_dir()
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(rec_dir)))
+        last_proj = config.get("last_project", "")
+        projects = config.get("projects", {})
+        target = None
+        if last_proj in projects and projects[last_proj]:
+            target = Path(projects[last_proj]) / "recordings"
+            if not target.exists():
+                target = Path(projects[last_proj])
+        elif projects:
+            first_folder = list(projects.values())[0]
+            target = Path(first_folder) / "recordings"
+            if not target.exists():
+                target = Path(first_folder)
+        if not target or not target.exists():
+            target = get_base_recordings_dir()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
     def _open_logs_folder(self):
         log_dir = get_logs_dir()
@@ -807,19 +824,6 @@ class MainWindow(QMainWindow):
                 f"Файл деинсталлятора (unins000.exe) создается автоматически при установке программы инсталлятором (Setup.exe) в директории:\n{get_install_root()}\n\n"
                 "Также удалить программу можно в любое время через 'Параметры Windows' -> 'Приложения' -> 'Установленные приложения'."
             )
-
-    def _check_updates(self):
-        self.checker = UpdateCheckerThread(parent=self)
-        self.checker.check_finished.connect(self._on_update_check_result)
-        self.checker.check_failed.connect(lambda err: QMessageBox.warning(self, "Обновления", f"Не удалось проверить обновления: {err}"))
-        self.checker.start()
-
-    def _on_update_check_result(self, has_update: bool, latest_v: str, changelog: str, download_url: str):
-        if has_update:
-            dlg = UpdateDialog(latest_v, changelog, download_url, self)
-            dlg.exec()
-        else:
-            QMessageBox.information(self, "Обновления", f"У вас установлена самая актуальная версия v{APP_VERSION}!")
 
     def _save_settings(self):
         autostart = self.chk_autostart.isChecked()

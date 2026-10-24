@@ -19,7 +19,6 @@ from src.ui.tray import TrayIconManager
 from src.ui.start_dialog import QuickStartDialog
 from src.ui.floating_widget import FloatingRecordingWidget
 from src.ui.onboarding_wizard import OnboardingWizardDialog
-from src.updater import UpdateCheckerThread, UpdateDialog
 from src.hotkeys import GlobalHotkeyListener
 
 class MeetRecorderApp(QObject):
@@ -59,19 +58,16 @@ class MeetRecorderApp(QObject):
         # Сигналы очереди транскрибаций
         queue_manager.queue_changed.connect(self._on_queue_changed)
 
-        # Тихая фоновая проверка обновлений через 5 секунд после запуска
-        QTimer.singleShot(5000, self._silent_update_check)
-
-        # Логика первого запуска или старта окна/трея
+        # Логика запуска окна или мастера настройки
         if config.get("first_run", True):
             QTimer.singleShot(150, self._launch_wizard)
         else:
-            is_autostart = "--autostart" in sys.argv or config.get("start_minimized", False)
-            if not is_autostart:
-                QTimer.singleShot(100, self.show_main_window)
-            else:
+            is_autostart = "--autostart" in sys.argv
+            if is_autostart and config.get("start_minimized", False):
                 hk_name = config.get("hotkey", "Ctrl+Alt+Z")
                 self.tray.show_notification("Meet Recorder", f"🎙️ Приложение работает в трее ({hk_name})")
+            else:
+                QTimer.singleShot(100, self.show_main_window)
 
     def _launch_wizard(self):
         logger.info("[App] Открытие мастера первичной настройки...")
@@ -149,18 +145,6 @@ class MeetRecorderApp(QObject):
             self.tray.show_notification(
                 "Meet Recorder",
                 "✅ Все встречи в очереди успешно расшифрованы!"
-            )
-
-    def _silent_update_check(self):
-        self.silent_checker = UpdateCheckerThread(parent=self)
-        self.silent_checker.check_finished.connect(self._on_silent_update_found)
-        self.silent_checker.start()
-
-    def _on_silent_update_found(self, has_update: bool, latest_v: str, changelog: str, download_url: str):
-        if has_update and download_url:
-            self.tray.show_notification(
-                "Meet Recorder",
-                f"🎉 Доступна новая версия {latest_v}! Нажмите 'Настройки' -> 'Проверить обновления'."
             )
 
     def quit_app(self):

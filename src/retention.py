@@ -18,17 +18,34 @@ def cleanup_old_media(days: int = None):
     if not base_dir.exists():
         return
 
-    # Обходим все файлы во всех подпапках recordings/
+    media_extensions = [".wav", ".mp3", ".mp4", ".mkv", ".avi"]
+
+    # 1. Обходим все файлы во всех подпапках recordings/
     for media_file in base_dir.rglob("*"):
-        if media_file.is_file() and media_file.suffix.lower() in [".wav", ".mp3", ".mp4", ".mkv", ".avi"]:
+        if media_file.is_file() and media_file.suffix.lower() in media_extensions:
             try:
-                file_mtime = media_file.stat().st_mtime
-                if file_mtime < cutoff_time:
+                if media_file.stat().st_mtime < cutoff_time:
                     media_file.unlink()
                     deleted_count += 1
-                    print(f"[Retention] Удален устаревший файл записи: {media_file.relative_to(base_dir)}")
+                    print(f"[Retention] Удален устаревший файл записи: {media_file.name}")
             except Exception as e:
                 print(f"[Retention] Ошибка удаления файла {media_file.name}: {e}")
+
+    # 2. Обходим папки recordings внутри настроенных проектов
+    projects = config.get("projects", {})
+    for proj_name, proj_folder in projects.items():
+        if proj_folder:
+            p_rec = Path(proj_folder) / "recordings"
+            if p_rec.exists():
+                for media_file in p_rec.glob("*"):
+                    if media_file.is_file() and media_file.suffix.lower() in media_extensions:
+                        try:
+                            if media_file.stat().st_mtime < cutoff_time:
+                                media_file.unlink()
+                                deleted_count += 1
+                                print(f"[Retention] Удален устаревший файл проекта '{proj_name}': {media_file.name}")
+                        except Exception as e:
+                            print(f"[Retention] Ошибка удаления файла проекта {media_file.name}: {e}")
 
     if deleted_count > 0:
         print(f"[Retention] Автоочистка завершена. Удалено устаревших записей: {deleted_count}")

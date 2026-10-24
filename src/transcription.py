@@ -145,7 +145,26 @@ class Transcriber:
                 )
                 segments_list = list(segments)
         except Exception as e:
-            logger.error("[Transcriber] Ошибка транскрибации Faster-Whisper", exc=e)
+            logger.warning(f"[Transcriber] Ошибка транскрибации на {self.current_device}: {e}")
+            if self.current_device == "cuda":
+                logger.info("[Transcriber] Автоматическое переключение на CPU (int8) и повтор транскрибации...")
+                try:
+                    from faster_whisper import WhisperModel
+                    self.model = WhisperModel(self.current_model_size or "medium", device="cpu", compute_type="int8")
+                    self.current_device = "cpu"
+                    config.set("compute_device", "cpu")
+                    segments, info = self.model.transcribe(
+                        str(audio_path),
+                        language="ru",
+                        beam_size=5,
+                        vad_filter=True
+                    )
+                    segments_list = list(segments)
+                    logger.info(f"[Transcriber] Успешная транскрибация на CPU! Сегментов: {len(segments_list)}")
+                except Exception as cpu_err:
+                    logger.error("[Transcriber] Ошибка повторной транскрибации на CPU", exc=cpu_err)
+            else:
+                logger.error("[Transcriber] Ошибка транскрибации Faster-Whisper", exc=e)
 
         transcript_blocks = []
         current_speaker = None
