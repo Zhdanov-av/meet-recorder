@@ -1,8 +1,26 @@
+from pathlib import Path
 from PySide6.QtWidgets import QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QPixmap, QColor, QPainter
-from PySide6.QtCore import Signal, QObject
+from PySide6.QtCore import Signal, QObject, Qt
+from src.config import get_install_root
 
 def create_tray_icon(is_recording: bool = False) -> QIcon:
+    icon_path = get_install_root() / "assets" / "icon.png"
+    if icon_path.exists():
+        pixmap = QPixmap(str(icon_path)).scaled(
+            32, 32,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        if is_recording:
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(QColor(230, 57, 70))
+            painter.setPen(QColor(255, 255, 255))
+            painter.drawEllipse(18, 2, 12, 12)
+            painter.end()
+        return QIcon(pixmap)
+
     pixmap = QPixmap(32, 32)
     pixmap.fill(QColor(0, 0, 0, 0))
     painter = QPainter(pixmap)

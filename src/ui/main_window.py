@@ -9,14 +9,39 @@ from PySide6.QtWidgets import (
     QDialog, QFormLayout, QScrollArea, QFrame
 )
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QFont, QCloseEvent, QDesktopServices, QKeySequence
+from PySide6.QtGui import QFont, QCloseEvent, QDesktopServices, QKeySequence, QIcon
 
-from src.config import config, APP_VERSION, get_base_recordings_dir
+from src.config import config, APP_VERSION, get_base_recordings_dir, get_install_root
 from src.queue_manager import queue_manager
 from src.audio_recorder import get_audio_devices
 from src.updater import UpdateCheckerThread, UpdateDialog
 from src.logger import get_logs_dir, logger
 from src.hotkeys import format_hotkey_display
+
+def get_whisper_cache_size_mb() -> float:
+    try:
+        hub_dir = Path.home() / ".cache" / "huggingface" / "hub"
+        if not hub_dir.exists():
+            return 0.0
+        total_bytes = 0
+        for p in hub_dir.glob("models--Systran--faster-whisper-*"):
+            total_bytes += sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+        return total_bytes / (1024 * 1024)
+    except Exception:
+        return 0.0
+
+def clear_whisper_cache() -> int:
+    import shutil
+    deleted = 0
+    try:
+        hub_dir = Path.home() / ".cache" / "huggingface" / "hub"
+        if hub_dir.exists():
+            for p in hub_dir.glob("models--Systran--faster-whisper-*"):
+                shutil.rmtree(p, ignore_errors=True)
+                deleted += 1
+    except Exception as e:
+        logger.error(f"Ошибка очистки кэша Whisper: {e}")
+    return deleted
 
 class HotkeyCaptureButton(QPushButton):
     """
@@ -223,6 +248,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"Meet Recorder v{APP_VERSION} - Управление и История")
         self.resize(820, 560)
         self.is_force_quitting = False
+
+        icon_path = get_install_root() / "assets" / "icon.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+
         self.init_ui()
 
         queue_manager.task_added.connect(self._on_task_updated)
@@ -644,6 +674,36 @@ class MainWindow(QMainWindow):
         stor_btn_h.addStretch()
         c_stor_lay.addLayout(stor_btn_h)
 
+        # Кэш моделей Whisper
+        c_stor_lay.addWidget(QLabel("<b>Кэш моделей искусственного интеллекта (Whisper):</b>"))
+        cache_h = QHBoxLayout()
+        self.lbl_whisper_cache = QLabel("Кэш моделей на диске: расчет...")
+        self.lbl_whisper_cache.setStyleSheet("color: #00FFCC;")
+        btn_clear_whisper = QPushButton("🗑️ Очистить кэш Whisper")
+        btn_clear_whisper.setObjectName("btn_secondary")
+        btn_clear_whisper.clicked.connect(self._clear_whisper_cache_clicked)
+        cache_h.addWidget(self.lbl_whisper_cache)
+        cache_h.addStretch()
+        cache_h.addWidget(btn_clear_whisper)
+        c_stor_lay.addLayout(cache_h)
+
+        lbl_cache_hint = QLabel("<i>Модели сохраняются в общем кэше пользователя (%USERPROFILE%\\.cache\\huggingface) и повторно не скачиваются при переустановке программы.</i>")
+        lbl_cache_hint.setStyleSheet("color: #9AA0A6; font-size: 11px;")
+        lbl_cache_hint.setWordWrap(True)
+        c_stor_lay.addWidget(lbl_cache_hint)
+
+        # Деинсталляция
+        unins_h = QHBoxLayout()
+        lbl_unins = QLabel("Деинсталляция программы (unins000.exe):")
+        lbl_unins.setStyleSheet("color: #9AA0A6;")
+        btn_unins = QPushButton("❌ Удалить приложение")
+        btn_unins.setObjectName("btn_cancel")
+        btn_unins.clicked.connect(self._launch_uninstaller)
+        unins_h.addWidget(lbl_unins)
+        unins_h.addStretch()
+        unins_h.addWidget(btn_unins)
+        c_stor_lay.addLayout(unins_h)
+
         layout.addWidget(card_storage)
 
         # 6. 🔄 Обновления и Диагностика
@@ -678,6 +738,8 @@ class MainWindow(QMainWindow):
         tab_lay.setContentsMargins(0, 0, 0, 0)
         tab_lay.addWidget(scroll)
 
+        self._update_whisper_cache_label()
+
     def _reset_hotkey_default(self):
         self.btn_hotkey.current_hotkey = "<ctrl>+<alt>+z"
         self.btn_hotkey.update_style()
@@ -689,6 +751,62 @@ class MainWindow(QMainWindow):
     def _open_logs_folder(self):
         log_dir = get_logs_dir()
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir)))
+
+    def _update_whisper_cache_label(self):
+        mb = get_whisper_cache_size_mb()
+        if mb >= 1024:
+            text = f"Кэш моделей на диске: <b>{mb / 1024:.2f} ГБ</b>"
+        elif mb > 0:
+            text = f"Кэш моделей на диске: <b>{mb:.1f} МБ</b>"
+        else:
+            text = "Кэш моделей на диске: <b>пусто (0 МБ)</b>"
+        self.lbl_whisper_cache.setText(text)
+
+    def _clear_whisper_cache_clicked(self):
+        mb = get_whisper_cache_size_mb()
+        if mb == 0:
+            QMessageBox.information(self, "Кэш пуст", "Кэш моделей Whisper уже пуст.")
+            return
+
+        size_str = f"{mb / 1024:.2f} ГБ" if mb >= 1024 else f"{mb:.1f} МБ"
+        reply = QMessageBox.question(
+            self,
+            "Очистка кэша моделей Whisper",
+            f"Текущий размер кэша моделей: {size_str}.\n\n"
+            "Удалить скачанные модели из папки пользователя (.cache/huggingface)?\n"
+            "При следующей записи встреч программе потребуется загрузить выбранную модель заново.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            del_count = clear_whisper_cache()
+            self._update_whisper_cache_label()
+            QMessageBox.information(
+                self,
+                "Кэш очищен",
+                f"Кэш моделей Whisper успешно удален ({size_str} освобождено)!"
+            )
+
+    def _launch_uninstaller(self):
+        uninstaller = get_install_root() / "unins000.exe"
+        if uninstaller.exists():
+            reply = QMessageBox.question(
+                self,
+                "Деинсталляция Meet Recorder",
+                "Вы действительно хотите запустить деинсталлятор и удалить программу?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                subprocess.Popen([str(uninstaller)])
+                self.is_force_quitting = True
+                self.close()
+                QApplication.quit()
+        else:
+            QMessageBox.information(
+                self,
+                "Деинсталлятор",
+                f"Файл деинсталлятора (unins000.exe) создается автоматически при установке программы инсталлятором (Setup.exe) в директории:\n{get_install_root()}\n\n"
+                "Также удалить программу можно в любое время через 'Параметры Windows' -> 'Приложения' -> 'Установленные приложения'."
+            )
 
     def _check_updates(self):
         self.checker = UpdateCheckerThread(parent=self)

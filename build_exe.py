@@ -18,6 +18,8 @@ def build():
         "--noconsole",
         "--noconfirm",
         "--clean",
+        f"--icon={str(root_dir / 'assets' / 'icon.ico')}",
+        f"--add-data={str(root_dir / 'assets')};assets",
         "--collect-all=soundcard",
         "--collect-all=faster_whisper",
         "--collect-all=ctranslate2",

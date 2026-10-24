@@ -4,11 +4,12 @@ import threading
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject, Signal, QThread, Qt, QTimer
+from PySide6.QtGui import QIcon
 
 from src.logger import logger, setup_exception_logging
 setup_exception_logging()
 
-from src.config import config, APP_VERSION
+from src.config import config, APP_VERSION, get_install_root
 from src.retention import cleanup_old_media
 from src.audio_recorder import DualChannelAudioRecorder
 from src.queue_manager import queue_manager
@@ -172,6 +173,10 @@ class MeetRecorderApp(QObject):
 def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+
+    icon_path = get_install_root() / "assets" / "icon.png"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     recorder_app = MeetRecorderApp()
 
