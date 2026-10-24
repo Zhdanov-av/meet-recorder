@@ -1,6 +1,6 @@
 ; Inno Setup Script для сборки MeetRecorder-Setup.exe
 #define MyAppName "Meet Recorder"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "MeetRecorder"
 #define MyAppExeName "MeetRecorder.exe"
 

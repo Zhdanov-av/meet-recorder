@@ -5,8 +5,8 @@ import traceback
 from pathlib import Path
 
 def get_logs_dir() -> Path:
-    """Папка логов в корне проекта"""
-    base_dir = Path(__file__).resolve().parent.parent / "logs"
+    """Папка логов в директории данных пользователя (%LOCALAPPDATA%/MeetRecorder/logs)"""
+    base_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "MeetRecorder" / "logs"
     base_dir.mkdir(parents=True, exist_ok=True)
     return base_dir
 

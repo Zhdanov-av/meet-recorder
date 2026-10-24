@@ -6,13 +6,20 @@ import threading
 from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
-from src.logger import logger
+from src.logger import logger, get_logs_dir
 from src.transcription import transcriber
 
 def get_history_file() -> Path:
-    base_dir = Path(__file__).resolve().parent.parent / "logs"
-    base_dir.mkdir(parents=True, exist_ok=True)
-    return base_dir / "history.json"
+    new_file = get_logs_dir() / "history.json"
+    if not new_file.exists():
+        old_file = Path(__file__).resolve().parent.parent / "logs" / "history.json"
+        if old_file.exists():
+            try:
+                import shutil
+                shutil.copy2(old_file, new_file)
+            except Exception:
+                pass
+    return new_file
 
 class TranscriptionQueueManager(QObject):
     task_added = Signal(dict)

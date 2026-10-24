@@ -3,7 +3,7 @@ import os
 import subprocess
 from pathlib import Path
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
     QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QCheckBox, QComboBox, QSpinBox, QLineEdit, QFileDialog, QMessageBox,
     QDialog, QFormLayout, QScrollArea, QFrame
@@ -704,7 +704,7 @@ class MainWindow(QMainWindow):
         lbl_unins = QLabel("Деинсталляция программы (unins000.exe):")
         lbl_unins.setStyleSheet("color: #9AA0A6;")
         btn_unins = QPushButton("❌ Удалить приложение")
-        btn_unins.setObjectName("btn_cancel")
+        btn_unins.setObjectName("btn_danger")
         btn_unins.clicked.connect(self._launch_uninstaller)
         unins_h.addWidget(lbl_unins)
         unins_h.addStretch()

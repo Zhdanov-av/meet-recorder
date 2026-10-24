@@ -4,7 +4,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 APP_NAME = "MeetRecorder"
 REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
 

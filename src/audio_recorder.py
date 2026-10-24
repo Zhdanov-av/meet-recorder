@@ -163,14 +163,16 @@ class DualChannelAudioRecorder:
         mic_full = np.concatenate(self.mic_frames, axis=0) if self.mic_frames else np.zeros(0, dtype=np.float32)
         loop_full = np.concatenate(self.loop_frames, axis=0) if self.loop_frames else np.zeros(0, dtype=np.float32)
 
-        min_len = min(len(mic_full), len(loop_full))
-        if min_len == 0:
-            min_len = self.sample_rate
-            mic_full = np.zeros(min_len, dtype=np.float32)
-            loop_full = np.zeros(min_len, dtype=np.float32)
+        max_len = max(len(mic_full), len(loop_full))
+        if max_len == 0:
+            max_len = self.sample_rate
+            mic_full = np.zeros(max_len, dtype=np.float32)
+            loop_full = np.zeros(max_len, dtype=np.float32)
         else:
-            mic_full = mic_full[:min_len]
-            loop_full = loop_full[:min_len]
+            if len(mic_full) < max_len:
+                mic_full = np.pad(mic_full, (0, max_len - len(mic_full)), mode="constant")
+            if len(loop_full) < max_len:
+                loop_full = np.pad(loop_full, (0, max_len - len(loop_full)), mode="constant")
 
         # Авто-усиление микрофона
         mic_full = mic_full * 3.5
@@ -191,5 +193,5 @@ class DualChannelAudioRecorder:
             wf.setframerate(self.sample_rate)
             wf.writeframes(stereo_int16.tobytes())
 
-        logger.info(f"[AudioRecorder] Запись сохранена: {self.output_filepath.name} ({min_len / self.sample_rate:.1f} сек)")
+        logger.info(f"[AudioRecorder] Запись сохранена: {self.output_filepath.name} ({max_len / self.sample_rate:.1f} сек)")
         return self.output_filepath

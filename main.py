@@ -1,5 +1,7 @@
 import sys
 import os
+import ctypes
+from ctypes import wintypes
 import threading
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
@@ -21,7 +23,26 @@ from src.ui.floating_widget import FloatingRecordingWidget
 from src.ui.onboarding_wizard import OnboardingWizardDialog
 from src.hotkeys import GlobalHotkeyListener
 
+_kernel32 = ctypes.windll.kernel32
+_kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+_kernel32.CreateMutexW.restype = wintypes.HANDLE
+_kernel32.CreateEventW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+_kernel32.CreateEventW.restype = wintypes.HANDLE
+_kernel32.SetEvent.argtypes = [wintypes.HANDLE]
+_kernel32.SetEvent.restype = wintypes.BOOL
+_kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+_kernel32.WaitForSingleObject.restype = wintypes.DWORD
+_kernel32.GetLastError.argtypes = []
+_kernel32.GetLastError.restype = wintypes.DWORD
+
+ERROR_ALREADY_EXISTS = 183
+WAIT_OBJECT_0 = 0
+_instance_mutex = None
+_show_event = None
+
 class MeetRecorderApp(QObject):
+    show_window_requested = Signal()
+
     def __init__(self):
         super().__init__()
         logger.info(f"Запуск приложения Meet Recorder v{APP_VERSION}...")
@@ -57,6 +78,12 @@ class MeetRecorderApp(QObject):
 
         # Сигналы очереди транскрибаций
         queue_manager.queue_changed.connect(self._on_queue_changed)
+
+        # Слушатель сигнала активации окна от повторно запущенного ярлыка
+        self.show_window_requested.connect(self.show_main_window, Qt.ConnectionType.QueuedConnection)
+        self._ipc_running = True
+        if _show_event:
+            threading.Thread(target=self._listen_single_instance_event, daemon=True).start()
 
         # Логика запуска окна или мастера настройки
         if config.get("first_run", True):
@@ -147,14 +174,30 @@ class MeetRecorderApp(QObject):
                 "✅ Все встречи в очереди успешно расшифрованы!"
             )
 
+    def _listen_single_instance_event(self):
+        while self._ipc_running and _show_event:
+            res = _kernel32.WaitForSingleObject(_show_event, 400)
+            if res == WAIT_OBJECT_0 and self._ipc_running:
+                self.show_window_requested.emit()
+
     def quit_app(self):
         logger.info("Завершение работы приложения...")
+        self._ipc_running = False
         self.hotkey_listener.stop()
         self.main_window.is_force_quitting = True
         self.main_window.close()
         QApplication.quit()
 
 def main():
+    global _instance_mutex, _show_event
+    _show_event = _kernel32.CreateEventW(None, False, False, "Local\\MeetRecorder_ShowWindow_Event")
+    _instance_mutex = _kernel32.CreateMutexW(None, False, "Local\\MeetRecorder_SingleInstance_Mutex")
+    if _kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        if _show_event:
+            _kernel32.SetEvent(_show_event)
+        logger.info("Приложение уже запущено — активируем существующее окно.")
+        sys.exit(0)
+
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
